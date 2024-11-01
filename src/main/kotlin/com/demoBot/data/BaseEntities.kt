@@ -16,16 +16,16 @@ import org.springframework.data.jpa.repository.JpaRepository
 @Entity
 @Table(name = "users")
 data class User(
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    val id: Long,
-
-    @Column(nullable = false)
-    val name: String,
+    @Column(unique = true, nullable = false, updatable = false)
+    val chatId: Long,
 
     @Column(unique = true, nullable = false)
     val email: String,
 ) {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    val id: Long? = null
+
     @OneToMany(mappedBy = "author", cascade = [CascadeType.ALL], fetch = FetchType.LAZY)
     val publications: List<Publication> = emptyList()
 }
@@ -33,21 +33,25 @@ data class User(
 @Entity
 @Table(name = "publications")
 data class Publication(
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    val id: Long,
+
 
     val title: String,
 
     val content: String,
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "user_id")
     val author: User? = null
-)
+) {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    val id: Long? = null
+}
 
 interface UserRepo : JpaRepository<User, Long> {
-    fun findByName(name: String): User?
+    fun findByChatId(chatId: Long): User?
+    fun existsUserByChatId(chatId: Long): Boolean
+    fun existsUserByEmail(email: String): Boolean
 }
 
 interface PublicationRepo : JpaRepository<Publication, Long> {
