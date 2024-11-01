@@ -9,7 +9,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.telegram.telegrambots.bots.TelegramLongPollingBot
@@ -190,11 +189,12 @@ class DemoBot(
     }
 
     private suspend fun sendMessage(chatId: Long, text: String) {
-        withContext(Dispatchers.IO) {
+        coroutineScope {
             launch {
                 execute(SendMessage(chatId.toString(), text))
             }
         }
+
     }
 
     private suspend fun switchToPassive(chatId: Long) {
@@ -221,6 +221,7 @@ class DemoBot(
 
     suspend fun notification(user: User, message: String, currentChatId: Long) {
         if (user.chatId == currentChatId) return
+        println("Send to ${user.email}")
         sendMessage(chatId = user.chatId, text = message)
     }
 

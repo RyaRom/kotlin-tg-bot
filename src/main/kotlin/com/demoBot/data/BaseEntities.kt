@@ -36,6 +36,7 @@ data class User(
 data class Publication(
     val title: String,
 
+    @Column(length = 2000)
     val content: String,
 
     @ManyToOne(fetch = FetchType.EAGER)

@@ -20,7 +20,6 @@ repositories {
 }
 
 dependencies {
-	implementation("org.springframework.boot:spring-boot-starter-data-r2dbc")
 	implementation("org.telegram:telegrambots:6.0.1")
 
 	implementation("org.springframework.boot:spring-boot-starter-data-jdbc")
