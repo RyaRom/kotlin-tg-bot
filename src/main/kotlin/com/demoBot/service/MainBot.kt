@@ -1,28 +1,26 @@
 package com.demoBot.service
 
 import com.demoBot.data.Publication
-import com.demoBot.data.PublicationRepo
 import com.demoBot.data.User
-import com.demoBot.data.UserRepo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
-import org.springframework.transaction.annotation.Transactional
 import org.telegram.telegrambots.bots.TelegramLongPollingBot
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage
 import org.telegram.telegrambots.meta.api.objects.Update
+import kotlin.coroutines.CoroutineContext
 
 @Service
 class DemoBot(
-    private val userRepo: UserRepo,
-    private val publicationRepo: PublicationRepo,
-) : TelegramLongPollingBot() {
+    private val userService: UserService,
+) : TelegramLongPollingBot(), CoroutineScope {
     @Value("\${telegram.bot.token}")
     private lateinit var botToken: String
 
@@ -47,27 +45,29 @@ class DemoBot(
 
     override fun onUpdateReceived(update: Update) {
         if (!update.hasMessage() || !update.message.hasText()) return
-        val chatId = update.message.chatId
-        val text = update.message.text
 
-        println("State = ${userStates[chatId]} Text = $text ChatId = $chatId")
+        launch {
+            val chatId = update.message.chatId
+            val text = update.message.text
 
-        when (userStates[chatId]) {
-            null -> handleStartCommand(chatId, text)
-            UserState.REGISTRATION -> handleReg(chatId, text)
-            UserState.AWAITING_TITLE -> handleTitle(chatId, text)
-            UserState.AWAITING_CONTENT -> handleContent(chatId, text)
-            UserState.AWAITING_PUBLICATION -> handlePublActions(chatId, text)
-            UserState.PASSIVE -> handleActions(chatId, text)
-            UserState.TESTING -> handleTestActions(chatId, text)
+            println("State = ${userStates[chatId]} Text = $text ChatId = $chatId")
+
+            when (userStates[chatId]) {
+                null -> handleStartCommand(chatId, text)
+                UserState.REGISTRATION -> handleReg(chatId, text)
+                UserState.AWAITING_TITLE -> handleTitle(chatId, text)
+                UserState.AWAITING_CONTENT -> handleContent(chatId, text)
+                UserState.AWAITING_PUBLICATION -> handlePublActions(chatId, text)
+                UserState.PASSIVE -> handleActions(chatId, text)
+                UserState.TESTING -> handleTestActions(chatId, text)
+            }
         }
     }
 
-    @Transactional(readOnly = true)
-    internal fun handleStartCommand(chatId: Long, text: String) {
+    private suspend fun handleStartCommand(chatId: Long, text: String) {
         when (text) {
             "/start" -> {
-                if (userRepo.existsUserByChatId(chatId)) {
+                if (userService.isUserExist(chatId)) {
                     switchToPassive(chatId)
                     return
                 }
@@ -87,61 +87,44 @@ class DemoBot(
         }
     }
 
-    @Transactional(readOnly = true)
-    internal fun onGetAllUsers(chatId: Long) {
-        val users = userRepo.findAll()
-            .joinToString(separator = "\n") { "User ${it.email}" }
-
-        if (users.isEmpty()) return
-        sendMessage(chatId, users)
-    }
-
-    @Transactional(readOnly = true)
-    internal fun onGetAllPubl(chatId: Long) {
-        val posts = publicationRepo.findAll().joinToString(separator = "\n\n") {
-            "Author = ${it.author?.email ?: "no mail"}\n" +
-                    "${it.title}\n" + it.content
-        }
-
-        if (posts.isEmpty()) return
-        sendMessage(chatId, posts)
-    }
-
-    @Transactional
-    internal fun handleReg(chatId: Long, mail: String) {
-        if (!mail.matches(Regex("(?:[a-z0-9!#\$%&'*+/=?^_`{|}~-]+(?:\\.[a-z0-9!#\$%&'*+/=?^_`{|}~-]+)*|\"(?:[\\x01-\\x08\\x0b\\x0c\\x0e-\\x1f\\x21\\x23-\\x5b\\x5d-\\x7f]|\\\\[\\x01-\\x09\\x0b\\x0c\\x0e-\\x7f])*\")@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\\[(?:(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9]))\\.){3}(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9])|[a-z0-9-]*[a-z0-9]:(?:[\\x01-\\x08\\x0b\\x0c\\x0e-\\x1f\\x21-\\x5a\\x53-\\x7f]|\\\\[\\x01-\\x09\\x0b\\x0c\\x0e-\\x7f])+)\\])"))) {
+    private suspend fun handleReg(chatId: Long, email: String) {
+        if (!userService.isMail(email)) {
             sendMessage(chatId, "Write actual email")
             return
         }
-        if (userRepo.existsUserByEmail(mail)) {
+        if (userService.isUserExistWithMail(email)) {
             sendMessage(chatId, "Email is already taken")
             return
         }
-        val user = User(chatId, mail)
-        userRepo.save(user)
+        userService.saveUser(chatId, email)
         switchToPassive(chatId)
     }
 
-    private fun handleActions(chatId: Long, text: String) {
+
+    private suspend fun handleActions(chatId: Long, text: String) {
         when (text) {
             "/new_publication" -> handlePublicationCreation(chatId)
-            "/get_all_users" -> onGetAllUsers(chatId)
-            "/get_all_publications" -> onGetAllPubl(chatId)
+            "/get_all_users" -> sendMessage(chatId, getUserStr())
+            "/get_all_publications" -> sendMessage(chatId, getPublStr())
             else -> {
                 sendMessage(chatId, commands)
             }
         }
     }
 
-    private fun handleTestActions(chatId: Long, text: String) {
-        when (text) {
-            "/big_ass_operation" -> longOperation(chatId)
-            "/big_ass_operation_async" -> {
-                CoroutineScope(Dispatchers.Default).launch {
-                    longOperationAsync(chatId)
-                }
-            }
+    private suspend fun getUserStr() = userService.getAllUsers()
+        .joinToString(separator = "\n") {
+            "User ${it.email}"
+        }
 
+    private suspend fun getPublStr() = userService.getAllPubl()
+        .joinToString(separator = "\n\n") {
+            "Author = ${it.author?.email ?: "no mail"}\n" +
+                    "${it.title}\n" + it.content
+        }
+
+    private suspend fun handleTestActions(chatId: Long, text: String) {
+        when (text) {
             "/get_back" -> {
                 userStates[chatId] = null
                 return
@@ -153,25 +136,7 @@ class DemoBot(
         }
     }
 
-    private fun longOperation(chatId: Long) = runBlocking {
-        var n = 0
-        repeat(10000) {
-            delay(1000L)
-            sendMessage(chatId, n.toString())
-            n++
-        }
-    }
-
-    private suspend fun longOperationAsync(chatId: Long) {
-        var n = 0
-        repeat(10000) {
-            delay(1000L)
-            sendMessage(chatId, n.toString())
-            n++
-        }
-    }
-
-    private fun handlePublActions(chatId: Long, text: String) {
+    private suspend fun handlePublActions(chatId: Long, text: String) {
         when (text) {
             "/post" -> onPostPublication(chatId)
             "/cancel" -> onCancelPublication(chatId)
@@ -182,44 +147,36 @@ class DemoBot(
         }
     }
 
-    private fun onCancelPublication(chatId: Long) {
+    private suspend fun onCancelPublication(chatId: Long) {
         pendingPublications.remove(chatId)
         sendMessage(chatId, "Publication cancelled")
         switchToPassive(chatId)
     }
 
-    private fun onReworkPublication(chatId: Long) {
+    private suspend fun onReworkPublication(chatId: Long) {
         pendingPublications[chatId]?.remove("content")
         sendMessage(chatId, "Waiting for new text")
         userStates[chatId] = UserState.AWAITING_CONTENT
     }
 
-    @Transactional
-    internal fun onPostPublication(chatId: Long) {
-        val title = pendingPublications[chatId]?.get("title") ?: "empty"
-        val content = pendingPublications[chatId]?.get("content") ?: "empty"
-        val author = userRepo.findByChatId(chatId)
-        if (author == null) {
-            userStates[chatId] = null
-            return
-        }
-
-        val post = Publication(
-            title = title, content = content, author = author
+    private suspend fun onPostPublication(chatId: Long) {
+        val post = userService.savePublication(
+            chatId,
+            pendingPublications[chatId]?.get("title"),
+            pendingPublications[chatId]?.get("content")
         )
-        publicationRepo.save(post)
         switchToPassive(chatId)
         notifyAll(publication = post, currentChatId = chatId)
     }
 
-    private fun handleTitle(chatId: Long, text: String) {
+    private suspend fun handleTitle(chatId: Long, text: String) {
         pendingPublications.putIfAbsent(chatId, HashMap())
         pendingPublications[chatId]!!["title"] = text
         sendMessage(chatId, "Great! Now, send the content of your publication.")
         userStates[chatId] = UserState.AWAITING_CONTENT
     }
 
-    private fun handleContent(chatId: Long, text: String) {
+    private suspend fun handleContent(chatId: Long, text: String) {
         pendingPublications.putIfAbsent(chatId, HashMap())
         pendingPublications[chatId]!!["content"] = text
         sendMessage(chatId, "Great! Publication saved.")
@@ -227,32 +184,38 @@ class DemoBot(
         userStates[chatId] = UserState.AWAITING_PUBLICATION
     }
 
-    private fun handlePublicationCreation(chatId: Long) {
+    private suspend fun handlePublicationCreation(chatId: Long) {
         sendMessage(chatId, "Let's create a new publication! Please send the title of your publication.")
         userStates[chatId] = UserState.AWAITING_TITLE
     }
 
-    private fun sendMessage(chatId: Long, text: String) {
-        execute(SendMessage(chatId.toString(), text))
+    private suspend fun sendMessage(chatId: Long, text: String) {
+        withContext(Dispatchers.IO) {
+            launch {
+                execute(SendMessage(chatId.toString(), text))
+            }
+        }
     }
 
-    private fun switchToPassive(chatId: Long) {
+    private suspend fun switchToPassive(chatId: Long) {
         userStates[chatId] = UserState.PASSIVE
         sendMessage(chatId, commands)
     }
 
-    private fun notifyAll(publication: Publication, currentChatId: Long) {
+    private suspend fun notifyAll(publication: Publication, currentChatId: Long) {
         val messageText = "New publication by ${publication.author?.email}:\n" +
                 "Title: ${publication.title}\n" +
                 "Content: ${publication.content}"
 
-        val users = userRepo.findAll()
-        CoroutineScope(Dispatchers.IO).launch {
-            users.map { user ->
-                async {
-                    notification(user, messageText, currentChatId)
-                }
-            }.awaitAll()
+        val users = userService.getAllUsers()
+        coroutineScope {
+            launch {
+                users.map { user ->
+                    async {
+                        notification(user, messageText, currentChatId)
+                    }
+                }.awaitAll()
+            }
         }
     }
 
@@ -260,6 +223,11 @@ class DemoBot(
         if (user.chatId == currentChatId) return
         sendMessage(chatId = user.chatId, text = message)
     }
+
+    private val processJob = SupervisorJob()
+
+    override val coroutineContext: CoroutineContext
+        get() = Dispatchers.IO + processJob
 }
 
 enum class UserState {

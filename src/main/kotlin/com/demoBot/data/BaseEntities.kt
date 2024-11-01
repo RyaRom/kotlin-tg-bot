@@ -12,6 +12,7 @@ import jakarta.persistence.ManyToOne
 import jakarta.persistence.OneToMany
 import jakarta.persistence.Table
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.stereotype.Repository
 
 @Entity
 @Table(name = "users")
@@ -33,8 +34,6 @@ data class User(
 @Entity
 @Table(name = "publications")
 data class Publication(
-
-
     val title: String,
 
     val content: String,
@@ -48,12 +47,14 @@ data class Publication(
     val id: Long? = null
 }
 
+@Repository
 interface UserRepo : JpaRepository<User, Long> {
     fun findByChatId(chatId: Long): User?
     fun existsUserByChatId(chatId: Long): Boolean
     fun existsUserByEmail(email: String): Boolean
 }
 
+@Repository
 interface PublicationRepo : JpaRepository<Publication, Long> {
     fun findByAuthorId(authorId: Long): List<Publication>
 }
