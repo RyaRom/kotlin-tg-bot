@@ -8,7 +8,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -33,6 +35,9 @@ class DemoBot(
     @Value("\${telegram.template.publ-command-list}")
     private lateinit var publCommands: String
 
+    @Value("\${telegram.template.test-command-list}")
+    private lateinit var testCommands: String
+
     override fun getBotToken() = botToken
 
     override fun getBotUsername() = botUsername
@@ -45,7 +50,7 @@ class DemoBot(
         val chatId = update.message.chatId
         val text = update.message.text
 
-        println("State = ${userStates[chatId]} Text = $text")
+        println("State = ${userStates[chatId]} Text = $text ChatId = $chatId")
 
         when (userStates[chatId]) {
             null -> handleStartCommand(chatId, text)
@@ -54,20 +59,31 @@ class DemoBot(
             UserState.AWAITING_CONTENT -> handleContent(chatId, text)
             UserState.AWAITING_PUBLICATION -> handlePublActions(chatId, text)
             UserState.PASSIVE -> handleActions(chatId, text)
+            UserState.TESTING -> handleTestActions(chatId, text)
         }
     }
 
     @Transactional(readOnly = true)
     internal fun handleStartCommand(chatId: Long, text: String) {
-        if (text == "/start") {
-            if (userRepo.existsUserByChatId(chatId)) {
-                switchToPassive(chatId)
-                return
+        when (text) {
+            "/start" -> {
+                if (userRepo.existsUserByChatId(chatId)) {
+                    switchToPassive(chatId)
+                    return
+                }
+                sendMessage(chatId, "Welcome! Please enter your email to register:")
+                userStates[chatId] = UserState.REGISTRATION
             }
-            sendMessage(chatId, "Welcome! Please enter your email to register:")
-            userStates[chatId] = UserState.REGISTRATION
-        } else {
-            sendMessage(chatId, "Please type /start to register.")
+
+            "/test" -> {
+                sendMessage(chatId, "entering test mode")
+                sendMessage(chatId, testCommands)
+                userStates[chatId] = UserState.TESTING
+            }
+
+            else -> {
+                sendMessage(chatId, "Please type /start to register.")
+            }
         }
     }
 
@@ -114,6 +130,44 @@ class DemoBot(
             else -> {
                 sendMessage(chatId, commands)
             }
+        }
+    }
+
+    private fun handleTestActions(chatId: Long, text: String) {
+        when (text) {
+            "/big_ass_operation" -> longOperation(chatId)
+            "/big_ass_operation_async" -> {
+                CoroutineScope(Dispatchers.Default).launch {
+                    longOperationAsync(chatId)
+                }
+            }
+
+            "/get_back" -> {
+                userStates[chatId] = null
+                return
+            }
+
+            else -> {
+                sendMessage(chatId, testCommands)
+            }
+        }
+    }
+
+    private fun longOperation(chatId: Long) = runBlocking {
+        var n = 0
+        repeat(10000) {
+            delay(1000L)
+            sendMessage(chatId, n.toString())
+            n++
+        }
+    }
+
+    private suspend fun longOperationAsync(chatId: Long) {
+        var n = 0
+        repeat(10000) {
+            delay(1000L)
+            sendMessage(chatId, n.toString())
+            n++
         }
     }
 
@@ -213,5 +267,6 @@ enum class UserState {
     AWAITING_TITLE,
     AWAITING_CONTENT,
     AWAITING_PUBLICATION,
-    PASSIVE
+    PASSIVE,
+    TESTING
 }
