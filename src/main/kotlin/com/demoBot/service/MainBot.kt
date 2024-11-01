@@ -9,6 +9,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.telegram.telegrambots.bots.TelegramLongPollingBot
@@ -104,10 +105,29 @@ class DemoBot(
         when (text) {
             "/new_publication" -> handlePublicationCreation(chatId)
             "/get_all_users" -> sendMessage(chatId, getUserStr())
-            "/get_all_publications" -> sendMessage(chatId, getPublStr())
+            "/get_all_publications" -> sendAllPublicationsInRow(chatId)
             else -> {
                 sendMessage(chatId, commands)
             }
+        }
+    }
+
+    private suspend fun sendAllPublications(chatId: Long) {
+        supervisorScope {
+            userService.getAllPubl().map {
+                async {
+                    sendMessage(chatId, getPublStr(it))
+                }
+            }.awaitAll()
+        }
+    }
+
+    private suspend fun sendAllPublicationsInRow(chatId: Long) {
+        userService.getAllPubl().forEach {
+            sendMessage(
+                chatId,
+                getPublStr(it)
+            )
         }
     }
 
@@ -116,11 +136,10 @@ class DemoBot(
             "User ${it.email}"
         }
 
-    private suspend fun getPublStr() = userService.getAllPubl()
-        .joinToString(separator = "\n\n") {
-            "Author = ${it.author?.email ?: "no mail"}\n" +
-                    "${it.title}\n" + it.content
-        }
+    private suspend fun getPublStr(it: Publication) =
+        "Author = ${it.author?.email ?: "no mail"}\n" +
+                "${it.title}\n" + it.content
+
 
     private suspend fun handleTestActions(chatId: Long, text: String) {
         when (text) {
@@ -221,7 +240,7 @@ class DemoBot(
 
     suspend fun notification(user: User, message: String, currentChatId: Long) {
         if (user.chatId == currentChatId) return
-        println("Send to ${user.email}")
+        println("Publication $message\n Sent to ${user.email}")
         sendMessage(chatId = user.chatId, text = message)
     }
 
